@@ -28,6 +28,8 @@ void Engine::initialize()
 	initializeSwapchain();
 	initializeCommandStructures();
 	initializeSyncStructures();
+	initializeDescriptors();
+	initializePipelines();
 
 	isInitialized = true;
 }
@@ -107,15 +109,17 @@ void Engine::render(float deltaTime)
 	// Make the swapchain image into writeable mode before rendering.
 	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-	// Make a clear-color from frame number. This will flash with a 120 frame period.
-	float flash = std::abs(std::sin(frameCount / 120.0f));
-	VkClearColorValue clearColorValue{ { 0.0f, 0.0f, flash, 1.0f } };
-	VkImageSubresourceRange clearRange = vkeUtils::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+	renderInBackground(deltaTime, cmd);
 
-	vkCmdClearColorImage(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
+	// Transition the draw image and the swapchain image into their correct transfer layouts.
+	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	// Execute a copy from the draw image into the swapchain image.
+	vkeUtils::copyImageToImage(cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawImage.imageExtent2D, swapchainExtent);
 
 	// Make the swapchain image into presentable mode.
-	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -141,6 +145,25 @@ void Engine::render(float deltaTime)
 	VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
 
 	frameCount++;
+}
+
+void Engine::renderInBackground(float deltaTime, VkCommandBuffer cmd)
+{
+	// Make a clear-color from frame number. This will flash with a 120 frame period.
+	float flash = std::abs(std::sin(frameCount / 120.0f));
+	VkClearColorValue clearColorValue{ { 0.0f, 0.0f, flash, 1.0f } };
+	VkImageSubresourceRange clearRange = vkeUtils::imageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+
+	// vkCmdClearColorImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
+
+	// BBind the gradient drawing compute pipeline.
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipeline);
+
+	// Bind the descriptor set containing the draw image for the compute pipeline.
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
+
+	// Execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it.
+	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawImage.imageExtent2D.width / 16), (uint32_t)std::ceil(drawImage.imageExtent2D.height / 16), 1);
 }
 
 void Engine::processInputs(float deltaTime)
@@ -224,6 +247,36 @@ void Engine::initializeVulkan()
 void Engine::initializeSwapchain()
 {
 	createSwapchain(windowExtent.width, windowExtent.height);
+
+	drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+	drawImage.imageExtent2D = { windowExtent.width, windowExtent.height };
+	drawImage.imageExtent3D = { windowExtent.width, windowExtent.height, 1 };
+
+	VkImageUsageFlags drawImageUsages{};
+
+	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	VkImageCreateInfo imageCretaeInfo = vkeUtils::imageCreateInfo(drawImage.imageFormat, drawImage.imageExtent3D, drawImageUsages);
+	VmaAllocationCreateInfo imageAllocationCreateinfo{};
+
+	imageAllocationCreateinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	imageAllocationCreateinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	vmaCreateImage(allocator, &imageCretaeInfo, &imageAllocationCreateinfo, &drawImage.image, &drawImage.allocation, nullptr);
+
+	VkImageViewCreateInfo imageViewCreateinfo = vkeUtils::imageViewCreateInfo(drawImage.imageFormat, drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+	VK_CHECK(vkCreateImageView(device, &imageViewCreateinfo, nullptr, &drawImage.imageView));
+
+	mainDeletionQueue.pushFunction([=]()
+	{
+		vkDestroyImageView(device, drawImage.imageView, nullptr);
+
+		vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
+	});
 }
 
 void Engine::initializeCommandStructures()
@@ -252,6 +305,102 @@ void Engine::initializeSyncStructures()
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].renderSemaphore));
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].swapchainSemaphore));
 	}
+}
+
+void Engine::initializeDescriptors()
+{
+	std::vector<DescriptorAllocator::PoolSizeRatio> sizes =
+	{
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 }
+	};
+
+	// Create a descriptor pool that will hold 10 sets with 1 image each.
+	globalDescriptorAllocator.initialize(device, 10, sizes);
+
+	// Make the descriptor set layout for our compute draw.
+	{
+		DescriptorLayoutBuilder builder;
+
+		builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+
+		drawImageDescriptorLayout = builder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
+	}
+
+	// Allocate a descriptor set for our draw image.
+	drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
+
+	VkDescriptorImageInfo descriptorImageInfo{};
+
+	descriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	descriptorImageInfo.imageView = drawImage.imageView;
+
+	VkWriteDescriptorSet writeDescriptorSet{};
+
+	writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writeDescriptorSet.pNext = nullptr;
+	writeDescriptorSet.dstBinding = 0;
+	writeDescriptorSet.dstSet = drawImageDescriptors;
+	writeDescriptorSet.descriptorCount = 1;
+	writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	writeDescriptorSet.pImageInfo = &descriptorImageInfo;
+
+	vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+
+	mainDeletionQueue.pushFunction([&]()
+	{
+		globalDescriptorAllocator.clear(device);
+
+		vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
+	});
+}
+
+void Engine::initializePipelines()
+{
+	initializeBackgroundPipelines();
+}
+
+void Engine::initializeBackgroundPipelines()
+{
+	VkPipelineLayoutCreateInfo computePipelineLayoutCreateInfo{};
+
+	computePipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	computePipelineLayoutCreateInfo.pNext = nullptr;
+	computePipelineLayoutCreateInfo.pSetLayouts = &drawImageDescriptorLayout;
+	computePipelineLayoutCreateInfo.setLayoutCount = 1;
+
+	VK_CHECK(vkCreatePipelineLayout(device, &computePipelineLayoutCreateInfo, nullptr, &gradientPipelineLayout));
+
+	VkShaderModule computeDrawShaderModule;
+
+	if (!vkeUtils::loadShaderModule("sources/shaders/gradient.comp.spv", device, &computeDrawShaderModule))
+	{
+		fmt::print("Error when building the compute shader. \n");
+	}
+
+	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo{};
+
+	pipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipelineShaderStageCreateInfo.pNext = nullptr;
+	pipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipelineShaderStageCreateInfo.module = computeDrawShaderModule;
+	pipelineShaderStageCreateInfo.pName = "main";
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.pNext = nullptr;
+	computePipelineCreateInfo.layout = gradientPipelineLayout;
+	computePipelineCreateInfo.stage = pipelineShaderStageCreateInfo;
+
+	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradientPipeline));
+
+	vkDestroyShaderModule(device, computeDrawShaderModule, nullptr);
+
+	mainDeletionQueue.pushFunction([&]()
+	{
+		vkDestroyPipelineLayout(device, gradientPipelineLayout, nullptr);
+		vkDestroyPipeline(device, gradientPipeline, nullptr);
+	});
 }
 
 void Engine::createSwapchain(uint32_t width, uint32_t height)

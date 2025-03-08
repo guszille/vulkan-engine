@@ -1,7 +1,6 @@
 #pragma once
 
 #define GLFW_INCLUDE_VULKAN
-#define VMA_IMPLEMENTATION
 
 #include <GLFW/glfw3.h>
 #include <vkb/VkBootstrap.h>
@@ -49,6 +48,10 @@ public:
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	VkQueue graphicsQueue = VK_NULL_HANDLE;
+	uint32_t graphicsQueueFamily;
+
+	VmaAllocator allocator;
 
 	VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 	VkFormat swapchainImageFormat;
@@ -56,12 +59,17 @@ public:
 	std::vector<VkImageView> swapchainImageViews;
 	VkExtent2D swapchainExtent;
 
+	AllocatedImage drawImage;
+
 	Frame frames[FRAMES_IN_FLIGHT];
 
-	VkQueue graphicsQueue = VK_NULL_HANDLE;
-	uint32_t graphicsQueueFamily;
+	DescriptorAllocator globalDescriptorAllocator;
 
-	VmaAllocator allocator;
+	VkDescriptorSet drawImageDescriptors = VK_NULL_HANDLE;
+	VkDescriptorSetLayout drawImageDescriptorLayout = VK_NULL_HANDLE;
+
+	VkPipeline gradientPipeline = VK_NULL_HANDLE;
+	VkPipelineLayout gradientPipelineLayout = VK_NULL_HANDLE;
 
 	DeletionQueue mainDeletionQueue;
 
@@ -73,6 +81,7 @@ public:
 
 private:
 	void render(float deltaTime);
+	void renderInBackground(float deltaTime, VkCommandBuffer cmd);
 	void processInputs(float deltaTime);
 
 	static void windowKeyCallback(GLFWwindow* window, int key, int scanCode, int action, int mods);
@@ -82,6 +91,9 @@ private:
 	void initializeSwapchain();
 	void initializeCommandStructures();
 	void initializeSyncStructures();
+	void initializeDescriptors();
+	void initializePipelines();
+	void initializeBackgroundPipelines();
 
 	void createSwapchain(uint32_t width, uint32_t height);
 	void cleanUpSwapchain();
