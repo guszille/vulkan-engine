@@ -30,6 +30,7 @@ void Engine::initialize()
 	initializeSyncStructures();
 	initializeDescriptors();
 	initializePipelines();
+	initializeImgui();
 
 	isInitialized = true;
 }
@@ -51,6 +52,29 @@ void Engine::run()
 
 			continue;
 		}
+
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+
+		ImGui::NewFrame();
+
+		if (ImGui::Begin("Background"))
+		{
+			ComputeEffect& selectedComputeEffect = backgroundEffects[currentBackgroundEffect];
+
+			ImGui::Text("Selected Effect: ", selectedComputeEffect.name);
+			
+			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+
+			ImGui::InputFloat4("data1", (float*)&selectedComputeEffect.pushConstants.data1);
+			ImGui::InputFloat4("data2", (float*)&selectedComputeEffect.pushConstants.data2);
+			ImGui::InputFloat4("data3", (float*)&selectedComputeEffect.pushConstants.data3);
+			ImGui::InputFloat4("data4", (float*)&selectedComputeEffect.pushConstants.data4);
+		}
+
+		ImGui::End();
+
+		ImGui::Render();
 
 		render(deltaTime);
 	}
@@ -89,6 +113,29 @@ void Engine::cleanUp()
 	engineReference = nullptr;
 }
 
+void Engine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function)
+{
+	VK_CHECK(vkResetFences(device, 1, &immFence));
+	VK_CHECK(vkResetCommandBuffer(immCommandBuffer, 0));
+
+	VkCommandBuffer cmd = immCommandBuffer;
+
+	VkCommandBufferBeginInfo cmdBufferBeginInfo = vkeUtils::commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBufferBeginInfo));
+
+	function(cmd);
+
+	VK_CHECK(vkEndCommandBuffer(cmd));
+
+	VkCommandBufferSubmitInfo cmdBufferSubmitInfo = vkeUtils::commandBufferSubmitInfo(cmd);
+	VkSubmitInfo2 submitInfo = vkeUtils::submitInfo(&cmdBufferSubmitInfo, nullptr, nullptr);
+
+	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submitInfo, immFence));
+
+	VK_CHECK(vkWaitForFences(device, 1, &immFence, true, UINT64_MAX));
+}
+
 void Engine::render(float deltaTime)
 {
 	VK_CHECK(vkWaitForFences(device, 1, &getCurrentFrame().renderFence, true, UINT64_MAX));
@@ -118,8 +165,13 @@ void Engine::render(float deltaTime)
 	// Execute a copy from the draw image into the swapchain image.
 	vkeUtils::copyImageToImage(cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawImage.imageExtent2D, swapchainExtent);
 
+	// Make the swapchain image into attachment optimal, so we can draw on it.
+	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	renderImgui(deltaTime, cmd, swapchainImageViews[swapchainImageIndex]);
+
 	// Make the swapchain image into presentable mode.
-	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -156,14 +208,30 @@ void Engine::renderInBackground(float deltaTime, VkCommandBuffer cmd)
 
 	// vkCmdClearColorImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearColorValue, 1, &clearRange);
 
-	// BBind the gradient drawing compute pipeline.
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipeline);
+	ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
+
+	// Bind the background compute pipeline.
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
 
 	// Bind the descriptor set containing the draw image for the compute pipeline.
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, defaultPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
+
+	vkCmdPushConstants(cmd, defaultPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.pushConstants);
 
 	// Execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it.
 	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawImage.imageExtent2D.width / 16), (uint32_t)std::ceil(drawImage.imageExtent2D.height / 16), 1);
+}
+
+void Engine::renderImgui(float deltaTime, VkCommandBuffer cmd, VkImageView targetImageView)
+{
+	VkRenderingAttachmentInfo colorAttachment = vkeUtils::renderingAttachmentInfo(targetImageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
+	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(swapchainExtent, &colorAttachment, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+	vkCmdEndRendering(cmd);
 }
 
 void Engine::processInputs(float deltaTime)
@@ -239,9 +307,9 @@ void Engine::initializeVulkan()
 	vmaCreateAllocator(&allocatorCreateInfo, &allocator);
 
 	mainDeletionQueue.pushFunction([&]()
-	{
-		vmaDestroyAllocator(allocator);
-	});
+		{
+			vmaDestroyAllocator(allocator);
+		});
 }
 
 void Engine::initializeSwapchain()
@@ -272,11 +340,11 @@ void Engine::initializeSwapchain()
 	VK_CHECK(vkCreateImageView(device, &imageViewCreateinfo, nullptr, &drawImage.imageView));
 
 	mainDeletionQueue.pushFunction([=]()
-	{
-		vkDestroyImageView(device, drawImage.imageView, nullptr);
+		{
+			vkDestroyImageView(device, drawImage.imageView, nullptr);
 
-		vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
-	});
+			vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
+		});
 }
 
 void Engine::initializeCommandStructures()
@@ -291,6 +359,17 @@ void Engine::initializeCommandStructures()
 
 		VK_CHECK(vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &frames[i].mainCommandBuffer));
 	}
+
+	VK_CHECK(vkCreateCommandPool(device, &cmdPoolCreateInfo, nullptr, &immCommandPool));
+
+	VkCommandBufferAllocateInfo cmdBufferAllocateInfo = vkeUtils::commandBufferAllocateInfo(immCommandPool, 1);
+
+	VK_CHECK(vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &immCommandBuffer));
+
+	mainDeletionQueue.pushFunction([=]()
+		{
+			vkDestroyCommandPool(device, immCommandPool, nullptr);
+		});
 }
 
 void Engine::initializeSyncStructures()
@@ -305,6 +384,13 @@ void Engine::initializeSyncStructures()
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].renderSemaphore));
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].swapchainSemaphore));
 	}
+
+	VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &immFence));
+
+	mainDeletionQueue.pushFunction([=]()
+		{
+			vkDestroyFence(device, immFence, nullptr);
+		});
 }
 
 void Engine::initializeDescriptors()
@@ -347,11 +433,11 @@ void Engine::initializeDescriptors()
 	vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
 
 	mainDeletionQueue.pushFunction([&]()
-	{
-		globalDescriptorAllocator.clear(device);
+		{
+			globalDescriptorAllocator.clear(device);
 
-		vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
-	});
+			vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
+		});
 }
 
 void Engine::initializePipelines()
@@ -361,45 +447,152 @@ void Engine::initializePipelines()
 
 void Engine::initializeBackgroundPipelines()
 {
+	VkPushConstantRange pushConstantRange{};
 	VkPipelineLayoutCreateInfo computePipelineLayoutCreateInfo{};
+
+	pushConstantRange.offset = 0;
+	pushConstantRange.size = sizeof(ComputePushConstants);
+	pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	computePipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	computePipelineLayoutCreateInfo.pNext = nullptr;
 	computePipelineLayoutCreateInfo.pSetLayouts = &drawImageDescriptorLayout;
 	computePipelineLayoutCreateInfo.setLayoutCount = 1;
+	computePipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+	computePipelineLayoutCreateInfo.pushConstantRangeCount = 1;
 
-	VK_CHECK(vkCreatePipelineLayout(device, &computePipelineLayoutCreateInfo, nullptr, &gradientPipelineLayout));
+	VK_CHECK(vkCreatePipelineLayout(device, &computePipelineLayoutCreateInfo, nullptr, &defaultPipelineLayout));
 
-	VkShaderModule computeDrawShaderModule;
+	VkShaderModule gradientShaderModule;
+	VkShaderModule skyShaderModule;
 
-	if (!vkeUtils::loadShaderModule("sources/shaders/gradient.comp.spv", device, &computeDrawShaderModule))
+	if (!vkeUtils::loadShaderModule("sources/shaders/gradient.comp.spv", device, &gradientShaderModule))
 	{
 		fmt::print("Error when building the compute shader. \n");
 	}
 
-	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo{};
-
-	pipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	pipelineShaderStageCreateInfo.pNext = nullptr;
-	pipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	pipelineShaderStageCreateInfo.module = computeDrawShaderModule;
-	pipelineShaderStageCreateInfo.pName = "main";
-
-	VkComputePipelineCreateInfo computePipelineCreateInfo{};
-
-	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	computePipelineCreateInfo.pNext = nullptr;
-	computePipelineCreateInfo.layout = gradientPipelineLayout;
-	computePipelineCreateInfo.stage = pipelineShaderStageCreateInfo;
-
-	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradientPipeline));
-
-	vkDestroyShaderModule(device, computeDrawShaderModule, nullptr);
-
-	mainDeletionQueue.pushFunction([&]()
+	if (!vkeUtils::loadShaderModule("sources/shaders/sky.comp.spv", device, &skyShaderModule))
 	{
-		vkDestroyPipelineLayout(device, gradientPipelineLayout, nullptr);
-		vkDestroyPipeline(device, gradientPipeline, nullptr);
+		fmt::print("Error when building the compute shader. \n");
+	}
+
+	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo[2]{ {}, {} };
+
+	pipelineShaderStageCreateInfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipelineShaderStageCreateInfo[0].pNext = nullptr;
+	pipelineShaderStageCreateInfo[0].stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipelineShaderStageCreateInfo[0].module = gradientShaderModule;
+	pipelineShaderStageCreateInfo[0].pName = "main";
+
+	pipelineShaderStageCreateInfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipelineShaderStageCreateInfo[1].pNext = nullptr;
+	pipelineShaderStageCreateInfo[1].stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipelineShaderStageCreateInfo[1].module = skyShaderModule;
+	pipelineShaderStageCreateInfo[1].pName = "main";
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo[2]{ {}, {} };
+
+	computePipelineCreateInfo[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo[0].pNext = nullptr;
+	computePipelineCreateInfo[0].layout = defaultPipelineLayout;
+	computePipelineCreateInfo[0].stage = pipelineShaderStageCreateInfo[0];
+
+	computePipelineCreateInfo[1].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo[1].pNext = nullptr;
+	computePipelineCreateInfo[1].layout = defaultPipelineLayout;
+	computePipelineCreateInfo[1].stage = pipelineShaderStageCreateInfo[1];
+
+	ComputeEffect gradientComputeEffect;
+	ComputeEffect skyComputeEffect;
+
+	gradientComputeEffect.name = "Gradient";
+	gradientComputeEffect.pipelineLayout = defaultPipelineLayout;
+	gradientComputeEffect.pushConstants = {};
+	gradientComputeEffect.pushConstants.data1 = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	gradientComputeEffect.pushConstants.data2 = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+
+	skyComputeEffect.name = "Sky";
+	skyComputeEffect.pipelineLayout = defaultPipelineLayout;
+	skyComputeEffect.pushConstants = {};
+	skyComputeEffect.pushConstants.data1 = glm::vec4(0.1f, 0.2f, 0.4f, 0.97f);
+
+	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo[0], nullptr, &gradientComputeEffect.pipeline));
+	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo[1], nullptr, &skyComputeEffect.pipeline));
+
+	backgroundEffects.push_back(gradientComputeEffect);
+	backgroundEffects.push_back(skyComputeEffect);
+
+	vkDestroyShaderModule(device, gradientShaderModule, nullptr);
+	vkDestroyShaderModule(device, skyShaderModule, nullptr);
+
+	mainDeletionQueue.pushFunction([=]()
+	{
+		vkDestroyPipelineLayout(device, defaultPipelineLayout, nullptr);
+		vkDestroyPipeline(device, gradientComputeEffect.pipeline, nullptr);
+		vkDestroyPipeline(device, skyComputeEffect.pipeline, nullptr);
+	});
+}
+
+void Engine::initializeImgui()
+{
+	// Create a descriptor pool for ImGUI.
+	VkDescriptorPoolSize poolSizes[] = {
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+	};
+
+	VkDescriptorPoolCreateInfo descriptorPoolCreateinfo{};
+	VkDescriptorPool imguiDescriptorPool;
+
+	descriptorPoolCreateinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	descriptorPoolCreateinfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	descriptorPoolCreateinfo.maxSets = 1000;
+	descriptorPoolCreateinfo.poolSizeCount = (uint32_t)std::size(poolSizes);
+	descriptorPoolCreateinfo.pPoolSizes = poolSizes;
+
+	VK_CHECK(vkCreateDescriptorPool(device, &descriptorPoolCreateinfo, nullptr, &imguiDescriptorPool));
+
+	// Initialize imgui library.
+	ImGui::CreateContext();
+
+	ImGui_ImplGlfw_InitForVulkan(window, true);
+
+	ImGui_ImplVulkan_InitInfo imguiVulkanInitInfo{};
+
+	imguiVulkanInitInfo.Instance = instance;
+	imguiVulkanInitInfo.PhysicalDevice = gpu;
+	imguiVulkanInitInfo.Device = device;
+	imguiVulkanInitInfo.Queue = graphicsQueue;
+	imguiVulkanInitInfo.DescriptorPool = imguiDescriptorPool;
+	imguiVulkanInitInfo.MinImageCount = 3;
+	imguiVulkanInitInfo.ImageCount = 3;
+	imguiVulkanInitInfo.UseDynamicRendering = true;
+	imguiVulkanInitInfo.PipelineRenderingCreateInfo = {};
+	imguiVulkanInitInfo.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+	imguiVulkanInitInfo.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+	imguiVulkanInitInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
+	imguiVulkanInitInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+	ImGui_ImplVulkan_Init(&imguiVulkanInitInfo);
+	ImGui_ImplVulkan_CreateFontsTexture();
+
+	mainDeletionQueue.pushFunction([=]()
+	{
+		ImGui_ImplVulkan_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
+
+		ImGui::DestroyContext();
+
+		vkDestroyDescriptorPool(device, imguiDescriptorPool, nullptr);
 	});
 }
 

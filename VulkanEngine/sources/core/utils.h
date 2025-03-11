@@ -4,6 +4,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
+
 #include <fmt/core.h>
 
 #include <vector>
@@ -38,4 +39,7 @@ namespace vkeUtils
 	void copyImageToImage(VkCommandBuffer cmd, VkImage srcImage, VkImage dstImage, VkExtent2D srcSize, VkExtent2D dstSize);
 
 	bool loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule);
+
+	VkRenderingAttachmentInfo renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue);
+	VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment);
 }

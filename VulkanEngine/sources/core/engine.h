@@ -3,8 +3,16 @@
 #define GLFW_INCLUDE_VULKAN
 
 #include <GLFW/glfw3.h>
+
 #include <vkb/VkBootstrap.h>
+
 #include <vkma/vk_mem_alloc.h>
+
+#include <imgui/imgui.h>
+#include <imgui/imgui_impl_glfw.h>
+#include <imgui/imgui_impl_vulkan.h>
+
+#include <glm/glm.hpp>
 
 #include <chrono>
 #include <thread>
@@ -24,6 +32,24 @@ struct Frame
 	VkSemaphore renderSemaphore, swapchainSemaphore;
 
 	DeletionQueue deletionQueue;
+};
+
+struct ComputePushConstants
+{
+	glm::vec4 data1;
+	glm::vec4 data2;
+	glm::vec4 data3;
+	glm::vec4 data4;
+};
+
+struct ComputeEffect
+{
+	const char* name;
+
+	VkPipeline pipeline = VK_NULL_HANDLE;
+	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+
+	ComputePushConstants pushConstants;
 };
 
 class Engine
@@ -68,8 +94,15 @@ public:
 	VkDescriptorSet drawImageDescriptors = VK_NULL_HANDLE;
 	VkDescriptorSetLayout drawImageDescriptorLayout = VK_NULL_HANDLE;
 
-	VkPipeline gradientPipeline = VK_NULL_HANDLE;
-	VkPipelineLayout gradientPipelineLayout = VK_NULL_HANDLE;
+	VkPipelineLayout defaultPipelineLayout = VK_NULL_HANDLE;
+
+	std::vector<ComputeEffect> backgroundEffects;
+	int currentBackgroundEffect = 0;
+
+	// Immediate submit structures.
+	VkFence immFence;
+	VkCommandBuffer immCommandBuffer;
+	VkCommandPool immCommandPool;
 
 	DeletionQueue mainDeletionQueue;
 
@@ -78,10 +111,12 @@ public:
 	void cleanUp();
 
 	Frame& getCurrentFrame() { return frames[frameCount % FRAMES_IN_FLIGHT]; };
+	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 private:
 	void render(float deltaTime);
 	void renderInBackground(float deltaTime, VkCommandBuffer cmd);
+	void renderImgui(float deltaTime, VkCommandBuffer cmd, VkImageView targetImageView);
 	void processInputs(float deltaTime);
 
 	static void windowKeyCallback(GLFWwindow* window, int key, int scanCode, int action, int mods);
@@ -94,6 +129,7 @@ private:
 	void initializeDescriptors();
 	void initializePipelines();
 	void initializeBackgroundPipelines();
+	void initializeImgui();
 
 	void createSwapchain(uint32_t width, uint32_t height);
 	void cleanUpSwapchain();

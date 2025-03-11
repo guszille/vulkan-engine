@@ -27,6 +27,27 @@
     <ClCompile Include="sources\core\structures.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_demo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_draw.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_impl_glfw.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_impl_vulkan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_tables.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="external\includes\imgui\imgui_widgets.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sources\core\engine.h">
@@ -41,5 +62,6 @@
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="sources\shaders\gradient.comp" />
+    <CustomBuild Include="sources\shaders\sky.comp" />
   </ItemGroup>
 </Project>

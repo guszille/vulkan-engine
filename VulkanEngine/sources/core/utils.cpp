@@ -248,3 +248,38 @@ bool vkeUtils::loadShaderModule(const char* filePath, VkDevice device, VkShaderM
 
 	return true;
 }
+
+VkRenderingAttachmentInfo vkeUtils::renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue)
+{
+	VkRenderingAttachmentInfo info = {};
+
+	info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	info.pNext = nullptr;
+	info.imageView = imageView;
+	info.imageLayout = imageLayout;
+	info.loadOp = clearValue ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+	if (clearValue)
+	{
+		info.clearValue = *clearValue;
+	}
+
+	return info;
+}
+
+VkRenderingInfo vkeUtils::renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment)
+{
+	VkRenderingInfo info{};
+
+	info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+	info.pNext = nullptr;
+	info.renderArea = VkRect2D{ VkOffset2D { 0, 0 }, renderExtent };
+	info.layerCount = 1;
+	info.colorAttachmentCount = 1;
+	info.pColorAttachments = colorAttachment;
+	info.pDepthAttachment = depthAttachment;
+	info.pStencilAttachment = nullptr;
+
+	return info;
+}

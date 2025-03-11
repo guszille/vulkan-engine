@@ -179,6 +179,13 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
     </CustomBuild>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="external\includes\imgui\imgui.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_demo.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_draw.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_impl_vulkan.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_tables.cpp" />
+    <ClCompile Include="external\includes\imgui\imgui_widgets.cpp" />
     <ClCompile Include="sources\core\engine.cpp" />
     <ClCompile Include="sources\core\structures.cpp" />
     <ClCompile Include="sources\core\utils.cpp" />
@@ -191,6 +198,11 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="sources\shaders\gradient.comp">
+      <FileType>Document</FileType>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="sources\shaders\sky.comp">
       <FileType>Document</FileType>
     </CustomBuild>
   </ItemGroup>
