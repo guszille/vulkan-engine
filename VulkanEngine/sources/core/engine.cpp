@@ -62,14 +62,14 @@ void Engine::run()
 		{
 			ComputeEffect& selectedComputeEffect = backgroundEffects[currentBackgroundEffect];
 
-			ImGui::Text("Selected Effect: ", selectedComputeEffect.name);
+			ImGui::Text("Selected Effect: %s", selectedComputeEffect.name);
 			
-			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, (int)backgroundEffects.size() - 1);
 
-			ImGui::InputFloat4("data1", (float*)&selectedComputeEffect.pushConstants.data1);
-			ImGui::InputFloat4("data2", (float*)&selectedComputeEffect.pushConstants.data2);
-			ImGui::InputFloat4("data3", (float*)&selectedComputeEffect.pushConstants.data3);
-			ImGui::InputFloat4("data4", (float*)&selectedComputeEffect.pushConstants.data4);
+			ImGui::InputFloat4("Data 1", (float*)&selectedComputeEffect.pushConstants.data1);
+			ImGui::InputFloat4("Data 2", (float*)&selectedComputeEffect.pushConstants.data2);
+			ImGui::InputFloat4("Data 3", (float*)&selectedComputeEffect.pushConstants.data3);
+			ImGui::InputFloat4("Data 4", (float*)&selectedComputeEffect.pushConstants.data4);
 		}
 
 		ImGui::End();
@@ -154,7 +154,7 @@ void Engine::render(float deltaTime)
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBufferBeginInfo));
 
 	// Make the swapchain image into writeable mode before rendering.
-	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
 	renderInBackground(deltaTime, cmd);
 
@@ -307,9 +307,9 @@ void Engine::initializeVulkan()
 	vmaCreateAllocator(&allocatorCreateInfo, &allocator);
 
 	mainDeletionQueue.pushFunction([&]()
-		{
-			vmaDestroyAllocator(allocator);
-		});
+	{
+		vmaDestroyAllocator(allocator);
+	});
 }
 
 void Engine::initializeSwapchain()
@@ -340,11 +340,11 @@ void Engine::initializeSwapchain()
 	VK_CHECK(vkCreateImageView(device, &imageViewCreateinfo, nullptr, &drawImage.imageView));
 
 	mainDeletionQueue.pushFunction([=]()
-		{
-			vkDestroyImageView(device, drawImage.imageView, nullptr);
+	{
+		vkDestroyImageView(device, drawImage.imageView, nullptr);
 
-			vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
-		});
+		vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
+	});
 }
 
 void Engine::initializeCommandStructures()
@@ -367,9 +367,9 @@ void Engine::initializeCommandStructures()
 	VK_CHECK(vkAllocateCommandBuffers(device, &cmdBufferAllocateInfo, &immCommandBuffer));
 
 	mainDeletionQueue.pushFunction([=]()
-		{
-			vkDestroyCommandPool(device, immCommandPool, nullptr);
-		});
+	{
+		vkDestroyCommandPool(device, immCommandPool, nullptr);
+	});
 }
 
 void Engine::initializeSyncStructures()
@@ -388,9 +388,9 @@ void Engine::initializeSyncStructures()
 	VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &immFence));
 
 	mainDeletionQueue.pushFunction([=]()
-		{
-			vkDestroyFence(device, immFence, nullptr);
-		});
+	{
+		vkDestroyFence(device, immFence, nullptr);
+	});
 }
 
 void Engine::initializeDescriptors()
@@ -433,11 +433,11 @@ void Engine::initializeDescriptors()
 	vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
 
 	mainDeletionQueue.pushFunction([&]()
-		{
-			globalDescriptorAllocator.clear(device);
+	{
+		globalDescriptorAllocator.clear(device);
 
-			vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
-		});
+		vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
+	});
 }
 
 void Engine::initializePipelines()
