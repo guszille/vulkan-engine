@@ -216,7 +216,7 @@ bool vkeUtils::loadShaderModule(const char* filePath, VkDevice device, VkShaderM
 
 	if (!file.is_open())
 	{
-		fmt::print("Can't open file at {}. \n", filePath);
+		fmt::println("Can't open file at {}.", filePath);
 
 		return false;
 	}
@@ -247,6 +247,34 @@ bool vkeUtils::loadShaderModule(const char* filePath, VkDevice device, VkShaderM
 	*outShaderModule = shaderModule;
 
 	return true;
+}
+
+VkPipelineShaderStageCreateInfo vkeUtils::pipelineShaderStageCreateInfo(VkShaderStageFlagBits stageFlagBits, VkShaderModule shaderModule, const char* entry)
+{
+	VkPipelineShaderStageCreateInfo info = {};
+
+	info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	info.pNext = nullptr;
+	info.stage = stageFlagBits;
+	info.module = shaderModule;
+	info.pName = entry;
+
+	return info;
+}
+
+VkPipelineLayoutCreateInfo vkeUtils::pipelineLayoutCreateInfo()
+{
+	VkPipelineLayoutCreateInfo info = {};
+
+	info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	info.pNext = nullptr;
+	info.flags = 0;
+	info.setLayoutCount = 0;
+	info.pSetLayouts = nullptr;
+	info.pushConstantRangeCount = 0;
+	info.pPushConstantRanges = nullptr;
+
+	return info;
 }
 
 VkRenderingAttachmentInfo vkeUtils::renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue)

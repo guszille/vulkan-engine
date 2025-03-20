@@ -39,6 +39,8 @@ namespace vkeUtils
 	void copyImageToImage(VkCommandBuffer cmd, VkImage srcImage, VkImage dstImage, VkExtent2D srcSize, VkExtent2D dstSize);
 
 	bool loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule);
+	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stageFlagBits, VkShaderModule shaderModule, const char* entry = "main");
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo();
 
 	VkRenderingAttachmentInfo renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue);
 	VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment);

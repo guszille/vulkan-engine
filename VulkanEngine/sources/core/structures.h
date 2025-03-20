@@ -66,3 +66,34 @@ struct DescriptorAllocator
 	void clear(VkDevice device);
 	VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 };
+
+class PipelineBuilder
+{
+public:
+	std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+
+	VkPipelineLayout pipelineLayout;
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
+	VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo;
+	VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
+	VkPipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo;
+	VkPipelineColorBlendAttachmentState colorBlendAttachmentState;
+	VkPipelineRenderingCreateInfo renderingCreateInfo;
+	VkFormat colorAttachmentFormat;
+
+	PipelineBuilder() { clear(); }
+
+	void clear();
+	void setShaders(VkShaderModule vertexShaderModule, VkShaderModule fragmentShaderModule);
+	void setInputTopology(VkPrimitiveTopology primitiveTopology);
+	void setPolygonMode(VkPolygonMode polygonMode);
+	void setCullMode(VkCullModeFlags cullModeFlags, VkFrontFace frontFace);
+	void disableMultisampling();
+	void disableDepthTest();
+	void disableBlending();
+	void setColorAttachmentFormat(VkFormat format);
+	void setDepthFormat(VkFormat format);
+
+	VkPipeline build(VkDevice device);
+};

@@ -82,3 +82,149 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDevice device, VkDescriptorSetLa
 
 	return descriptorSet;
 }
+
+void PipelineBuilder::clear()
+{
+	pipelineLayout = {};
+
+	inputAssemblyStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+
+	rasterizationStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+
+	multisampleStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+
+	depthStencilStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+
+	colorBlendAttachmentState = {};
+
+	renderingCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+
+	shaderStages.clear();
+}
+
+void PipelineBuilder::setShaders(VkShaderModule vertexShaderModule, VkShaderModule fragmentShaderModule)
+{
+	shaderStages.clear();
+
+	shaderStages.push_back(vkeUtils::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShaderModule));
+
+	shaderStages.push_back(vkeUtils::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShaderModule));
+}
+
+void PipelineBuilder::setInputTopology(VkPrimitiveTopology primitiveTopology)
+{
+	inputAssemblyStateCreateInfo.topology = primitiveTopology;
+	inputAssemblyStateCreateInfo.primitiveRestartEnable = VK_FALSE;
+}
+
+void PipelineBuilder::setPolygonMode(VkPolygonMode polygonMode)
+{
+	rasterizationStateCreateInfo.polygonMode = polygonMode;
+	rasterizationStateCreateInfo.lineWidth = 1.0f;
+}
+
+void PipelineBuilder::setCullMode(VkCullModeFlags cullModeFlags, VkFrontFace frontFace)
+{
+	rasterizationStateCreateInfo.cullMode = cullModeFlags;
+	rasterizationStateCreateInfo.frontFace = frontFace;
+}
+
+void PipelineBuilder::disableMultisampling()
+{
+	multisampleStateCreateInfo.sampleShadingEnable = VK_FALSE;
+	multisampleStateCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampleStateCreateInfo.minSampleShading = 1.0f;
+	multisampleStateCreateInfo.pSampleMask = nullptr;
+	multisampleStateCreateInfo.alphaToCoverageEnable = VK_FALSE;
+	multisampleStateCreateInfo.alphaToOneEnable = VK_FALSE;
+}
+
+void PipelineBuilder::disableDepthTest()
+{
+	depthStencilStateCreateInfo.depthTestEnable = VK_FALSE;
+	depthStencilStateCreateInfo.depthWriteEnable = VK_FALSE;
+	depthStencilStateCreateInfo.depthCompareOp = VK_COMPARE_OP_NEVER;
+	depthStencilStateCreateInfo.depthBoundsTestEnable = VK_FALSE;
+	depthStencilStateCreateInfo.stencilTestEnable = VK_FALSE;
+	depthStencilStateCreateInfo.front = {};
+	depthStencilStateCreateInfo.back = {};
+	depthStencilStateCreateInfo.minDepthBounds = 0.0f;
+	depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
+}
+
+void PipelineBuilder::disableBlending()
+{
+	colorBlendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachmentState.blendEnable = VK_FALSE;
+}
+
+void PipelineBuilder::setColorAttachmentFormat(VkFormat format)
+{
+	colorAttachmentFormat = format;
+
+	renderingCreateInfo.colorAttachmentCount = 1;
+	renderingCreateInfo.pColorAttachmentFormats = &colorAttachmentFormat;
+}
+
+void PipelineBuilder::setDepthFormat(VkFormat format)
+{
+	renderingCreateInfo.depthAttachmentFormat = format;
+}
+
+VkPipeline PipelineBuilder::build(VkDevice device)
+{
+	VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {};
+
+	viewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportStateCreateInfo.pNext = nullptr;
+	viewportStateCreateInfo.viewportCount = 1;
+	viewportStateCreateInfo.scissorCount = 1;
+
+	VkPipelineColorBlendStateCreateInfo colorBlendStateCreateInfo = {};
+
+	colorBlendStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlendStateCreateInfo.pNext = nullptr;
+	colorBlendStateCreateInfo.logicOpEnable = VK_FALSE;
+	colorBlendStateCreateInfo.logicOp = VK_LOGIC_OP_COPY;
+	colorBlendStateCreateInfo.attachmentCount = 1;
+	colorBlendStateCreateInfo.pAttachments = &colorBlendAttachmentState;
+
+	// Let VertexInputStateCreateInfo completely clear, as we have no need for it.
+	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+
+	VkDynamicState dynamicState[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+
+	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	
+	dynamicStateCreateInfo.pDynamicStates = &dynamicState[0];
+	dynamicStateCreateInfo.dynamicStateCount = 2;
+
+	// Build the actual pipeline.
+	VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	
+	graphicsPipelineCreateInfo.pNext = &renderingCreateInfo;
+	graphicsPipelineCreateInfo.stageCount = (uint32_t)shaderStages.size();
+	graphicsPipelineCreateInfo.pStages = shaderStages.data();
+	graphicsPipelineCreateInfo.layout = pipelineLayout;
+	graphicsPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+	graphicsPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+	graphicsPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+	graphicsPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+	graphicsPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+	graphicsPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
+	graphicsPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+	graphicsPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+
+	VkPipeline pipeline;
+
+	if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &pipeline) != VK_SUCCESS)
+	{
+		fmt::println("Failed to create pipeline!");
+
+		return VK_NULL_HANDLE;
+	}
+	else
+	{
+		return pipeline;
+	}
+}

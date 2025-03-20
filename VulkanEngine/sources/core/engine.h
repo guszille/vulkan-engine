@@ -99,6 +99,9 @@ public:
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect = 0;
 
+	VkPipelineLayout trianglePipelineLayout;
+	VkPipeline trianglePipeline;
+
 	// Immediate submit structures.
 	VkFence immFence;
 	VkCommandBuffer immCommandBuffer;
@@ -116,6 +119,7 @@ public:
 private:
 	void render(float deltaTime);
 	void renderInBackground(float deltaTime, VkCommandBuffer cmd);
+	void renderGeometry(float deltaTime, VkCommandBuffer cmd);
 	void renderImgui(float deltaTime, VkCommandBuffer cmd, VkImageView targetImageView);
 	void processInputs(float deltaTime);
 
@@ -129,6 +133,7 @@ private:
 	void initializeDescriptors();
 	void initializePipelines();
 	void initializeBackgroundPipelines();
+	void initializeTrianglePipeline();
 	void initializeImgui();
 
 	void createSwapchain(uint32_t width, uint32_t height);

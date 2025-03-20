@@ -63,5 +63,7 @@
   <ItemGroup>
     <CustomBuild Include="sources\shaders\gradient.comp" />
     <CustomBuild Include="sources\shaders\sky.comp" />
+    <CustomBuild Include="sources\shaders\colored_triangle.vert" />
+    <CustomBuild Include="sources\shaders\colored_triangle.frag" />
   </ItemGroup>
 </Project>

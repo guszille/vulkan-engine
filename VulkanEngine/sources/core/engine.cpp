@@ -158,8 +158,12 @@ void Engine::render(float deltaTime)
 
 	renderInBackground(deltaTime, cmd);
 
+	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	renderGeometry(deltaTime, cmd);
+
 	// Transition the draw image and the swapchain image into their correct transfer layouts.
-	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	// Execute a copy from the draw image into the swapchain image.
@@ -220,6 +224,38 @@ void Engine::renderInBackground(float deltaTime, VkCommandBuffer cmd)
 
 	// Execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it.
 	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawImage.imageExtent2D.width / 16), (uint32_t)std::ceil(drawImage.imageExtent2D.height / 16), 1);
+}
+
+void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
+{
+	VkRenderingAttachmentInfo colorAttachment = vkeUtils::renderingAttachmentInfo(drawImage.imageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
+	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(drawImage.imageExtent2D, &colorAttachment, nullptr);
+	
+	vkCmdBeginRendering(cmd, &renderingInfo);
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+
+	VkViewport viewport = {};
+	VkRect2D scissor = {};
+
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)drawImage.imageExtent2D.width;
+	viewport.height = (float)drawImage.imageExtent2D.height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = drawImage.imageExtent2D.width;
+	scissor.extent.height = drawImage.imageExtent2D.height;
+
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+	vkCmdDraw(cmd, 3, 1, 0, 0);
+
+	vkCmdEndRendering(cmd);
 }
 
 void Engine::renderImgui(float deltaTime, VkCommandBuffer cmd, VkImageView targetImageView)
@@ -443,6 +479,8 @@ void Engine::initializeDescriptors()
 void Engine::initializePipelines()
 {
 	initializeBackgroundPipelines();
+
+	initializeTrianglePipeline();
 }
 
 void Engine::initializeBackgroundPipelines()
@@ -468,12 +506,12 @@ void Engine::initializeBackgroundPipelines()
 
 	if (!vkeUtils::loadShaderModule("sources/shaders/gradient.comp.spv", device, &gradientShaderModule))
 	{
-		fmt::print("Error when building the compute shader. \n");
+		fmt::println("Error when building the compute shader.");
 	}
 
 	if (!vkeUtils::loadShaderModule("sources/shaders/sky.comp.spv", device, &skyShaderModule))
 	{
-		fmt::print("Error when building the compute shader. \n");
+		fmt::println("Error when building the compute shader.");
 	}
 
 	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo[2]{ {}, {} };
@@ -530,6 +568,60 @@ void Engine::initializeBackgroundPipelines()
 		vkDestroyPipelineLayout(device, defaultPipelineLayout, nullptr);
 		vkDestroyPipeline(device, gradientComputeEffect.pipeline, nullptr);
 		vkDestroyPipeline(device, skyComputeEffect.pipeline, nullptr);
+	});
+}
+
+void Engine::initializeTrianglePipeline()
+{
+	VkShaderModule triangleVertexShaderModule;
+	VkShaderModule triangleFragmentShaderModule;
+
+	if (!vkeUtils::loadShaderModule("sources/shaders/colored_triangle.vert.spv", device, &triangleVertexShaderModule))
+	{
+		fmt::println("Error when building the triangle vertex shader module.");
+	}
+	else
+	{
+		fmt::println("Triangle vertex shader succesfully loaded.");
+	}
+
+	if (!vkeUtils::loadShaderModule("sources/shaders/colored_triangle.frag.spv", device, &triangleFragmentShaderModule))
+	{
+		fmt::println("Error when building the triangle fragment shader module.");
+	}
+	else
+	{
+		fmt::println("Triangle fragment shader succesfully loaded.");
+	}
+
+	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vkeUtils::pipelineLayoutCreateInfo();
+	
+	VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &trianglePipelineLayout));
+
+	PipelineBuilder pipelineBuilder;
+
+	pipelineBuilder.pipelineLayout = trianglePipelineLayout;
+
+	pipelineBuilder.setShaders(triangleVertexShaderModule, triangleFragmentShaderModule);
+	pipelineBuilder.setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	pipelineBuilder.setPolygonMode(VK_POLYGON_MODE_FILL);
+	pipelineBuilder.setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	pipelineBuilder.disableMultisampling();
+	pipelineBuilder.disableDepthTest();
+	pipelineBuilder.disableBlending();
+
+	pipelineBuilder.setColorAttachmentFormat(drawImage.imageFormat);
+	pipelineBuilder.setDepthFormat(VK_FORMAT_UNDEFINED);
+
+	trianglePipeline = pipelineBuilder.build(device);
+
+	vkDestroyShaderModule(device, triangleVertexShaderModule, nullptr);
+	vkDestroyShaderModule(device, triangleFragmentShaderModule, nullptr);
+
+	mainDeletionQueue.pushFunction([&]()
+	{
+		vkDestroyPipelineLayout(device, trianglePipelineLayout, nullptr);
+		vkDestroyPipeline(device, trianglePipeline, nullptr);
 	});
 }
 
