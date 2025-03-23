@@ -65,5 +65,6 @@
     <CustomBuild Include="sources\shaders\sky.comp" />
     <CustomBuild Include="sources\shaders\colored_triangle.vert" />
     <CustomBuild Include="sources\shaders\colored_triangle.frag" />
+    <CustomBuild Include="sources\shaders\colored_triangle_mesh.vert" />
   </ItemGroup>
 </Project>

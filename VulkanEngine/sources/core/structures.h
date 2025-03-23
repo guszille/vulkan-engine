@@ -4,6 +4,8 @@
 
 #include <vkma/vk_mem_alloc.h>
 
+#include <glm/glm.hpp>
+
 #include <span>
 #include <deque>
 #include <functional>
@@ -40,6 +42,14 @@ struct AllocatedImage
 	VkExtent3D imageExtent3D;
 
 	VmaAllocation allocation;
+};
+
+struct AllocatedBuffer
+{
+	VkBuffer buffer;
+
+	VmaAllocation allocation;
+	VmaAllocationInfo allocationInfo;
 };
 
 struct DescriptorLayoutBuilder
@@ -96,4 +106,30 @@ public:
 	void setDepthFormat(VkFormat format);
 
 	VkPipeline build(VkDevice device);
+};
+
+// The reason the uv parameters are interleaved is due to alignement limitations on GPUs.
+// We want this structure to match the shader version so interleaving it like this improves it.
+struct Vertex
+{
+	glm::vec3 position;
+	float uvX;
+	glm::vec3 normal;
+	float uvY;
+	glm::vec4 color;
+};
+
+struct GPUMeshBuffers
+{
+	AllocatedBuffer vertexBuffer;
+	AllocatedBuffer indexBuffer;
+
+	VkDeviceAddress vertexBufferAddress;
+};
+
+struct GPUDrawPushConstants
+{
+	glm::mat4 worldMatrix;
+
+	VkDeviceAddress vertexBufferAddress;
 };

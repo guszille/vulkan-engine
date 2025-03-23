@@ -14,6 +14,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <chrono>
 #include <thread>
 #include <cassert>
@@ -101,6 +102,10 @@ public:
 
 	VkPipelineLayout trianglePipelineLayout;
 	VkPipeline trianglePipeline;
+	VkPipelineLayout meshPipelineLayout;
+	VkPipeline meshPipeline;
+
+	GPUMeshBuffers rectangle;
 
 	// Immediate submit structures.
 	VkFence immFence;
@@ -134,8 +139,15 @@ private:
 	void initializePipelines();
 	void initializeBackgroundPipelines();
 	void initializeTrianglePipeline();
+	void initializeMeshPipeline();
 	void initializeImgui();
+	void initalizeDefaultData();
 
 	void createSwapchain(uint32_t width, uint32_t height);
 	void cleanUpSwapchain();
+
+	AllocatedBuffer createBuffer(size_t allocationSize, VkBufferUsageFlags bufferUsageFlags, VmaMemoryUsage memoryUsage);
+	void destroyBuffer(const AllocatedBuffer& buffer);
+
+	GPUMeshBuffers uploadMesh(std::span<Vertex> vertices, std::span<uint32_t> indices);
 };
