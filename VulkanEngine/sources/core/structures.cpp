@@ -139,6 +139,19 @@ void PipelineBuilder::disableMultisampling()
 	multisampleStateCreateInfo.alphaToOneEnable = VK_FALSE;
 }
 
+void PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp)
+{
+	depthStencilStateCreateInfo.depthTestEnable = VK_TRUE;
+	depthStencilStateCreateInfo.depthWriteEnable = depthWriteEnable;
+	depthStencilStateCreateInfo.depthCompareOp = compareOp;
+	depthStencilStateCreateInfo.depthBoundsTestEnable = VK_FALSE;
+	depthStencilStateCreateInfo.stencilTestEnable = VK_FALSE;
+	depthStencilStateCreateInfo.front = {};
+	depthStencilStateCreateInfo.back = {};
+	depthStencilStateCreateInfo.minDepthBounds = 0.0f;
+	depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
+}
+
 void PipelineBuilder::disableDepthTest()
 {
 	depthStencilStateCreateInfo.depthTestEnable = VK_FALSE;

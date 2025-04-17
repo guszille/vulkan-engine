@@ -98,7 +98,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;fastgltf\fastgltf.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CustomBuild>
       <Command>$(VULKAN_SDK)\Bin\glslangValidator -V -o %(Identity).spv %(Identity)
@@ -123,7 +123,7 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;fastgltf\fastgltf.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CustomBuild>
       <Command>$(VULKAN_SDK)\Bin\glslangValidator -V -o %(Identity).spv %(Identity)
@@ -144,7 +144,7 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;fastgltf\fastgltf.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CustomBuild>
       <Command>$(VULKAN_SDK)\Bin\glslangValidator -V -o %(Identity).spv %(Identity)
@@ -169,7 +169,7 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;GLFW\glfw3.lib;vkb\vk-bootstrap.lib;fastgltf\fastgltf.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CustomBuild>
       <Command>$(VULKAN_SDK)\Bin\glslangValidator -V -o %(Identity).spv %(Identity)
@@ -187,12 +187,14 @@ copy %(Identity).spv $(OutDir)\%(Identity).spv</Command>
     <ClCompile Include="external\includes\imgui\imgui_tables.cpp" />
     <ClCompile Include="external\includes\imgui\imgui_widgets.cpp" />
     <ClCompile Include="sources\core\engine.cpp" />
+    <ClCompile Include="sources\core\loader.cpp" />
     <ClCompile Include="sources\core\structures.cpp" />
     <ClCompile Include="sources\core\utils.cpp" />
     <ClCompile Include="sources\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sources\core\engine.h" />
+    <ClInclude Include="sources\core\loader.h" />
     <ClInclude Include="sources\core\structures.h" />
     <ClInclude Include="sources\core\utils.h" />
   </ItemGroup>

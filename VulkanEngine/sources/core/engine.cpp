@@ -98,6 +98,12 @@ void Engine::cleanUp()
 			frames[i].deletionQueue.flush();
 		}
 
+		for (auto& mesh : testMeshes)
+		{
+			destroyBuffer(mesh->meshBuffers.vertexBuffer);
+			destroyBuffer(mesh->meshBuffers.indexBuffer);
+		}
+
 		mainDeletionQueue.flush();
 
 		cleanUpSwapchain();
@@ -137,6 +143,54 @@ void Engine::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function
 	VK_CHECK(vkWaitForFences(device, 1, &immFence, true, UINT64_MAX));
 }
 
+GPUMeshBuffers Engine::uploadMesh(std::span<Vertex> vertices, std::span<uint32_t> indices)
+{
+	const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+	const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+	GPUMeshBuffers newSurface;
+
+	newSurface.vertexBuffer = createBuffer(vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer };
+
+	newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
+	newSurface.indexBuffer = createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	AllocatedBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	void* mappedData = stagingBuffer.allocationInfo.pMappedData;
+
+	//vmaMapMemory(allocator, stagingBuffer.allocation, &mappedData);
+
+	memcpy(mappedData, vertices.data(), vertexBufferSize); // Copy vertex buffer.
+	memcpy((char*)mappedData + vertexBufferSize, indices.data(), indexBufferSize); // Copy index buffer.
+
+	//vmaUnmapMemory(allocator, stagingBuffer.allocation);
+
+	immediateSubmit([&](VkCommandBuffer cmd)
+	{
+		VkBufferCopy vertexBufferCopy{ 0 };
+
+		vertexBufferCopy.dstOffset = 0;
+		vertexBufferCopy.srcOffset = 0;
+		vertexBufferCopy.size = vertexBufferSize;
+
+		vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.vertexBuffer.buffer, 1, &vertexBufferCopy);
+
+		VkBufferCopy indexBufferCopy{ 0 };
+
+		indexBufferCopy.dstOffset = 0;
+		indexBufferCopy.srcOffset = vertexBufferSize;
+		indexBufferCopy.size = indexBufferSize;
+
+		vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer, 1, &indexBufferCopy);
+	});
+
+	destroyBuffer(stagingBuffer);
+
+	return newSurface;
+}
+
 void Engine::render(float deltaTime)
 {
 	VK_CHECK(vkWaitForFences(device, 1, &getCurrentFrame().renderFence, true, UINT64_MAX));
@@ -160,6 +214,7 @@ void Engine::render(float deltaTime)
 	renderInBackground(deltaTime, cmd);
 
 	vkeUtils::transitionImageLayout(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	vkeUtils::transitionImageLayout(cmd, depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
 	renderGeometry(deltaTime, cmd);
 
@@ -229,12 +284,13 @@ void Engine::renderInBackground(float deltaTime, VkCommandBuffer cmd)
 
 void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
 {
-	VkRenderingAttachmentInfo colorAttachment = vkeUtils::renderingAttachmentInfo(drawImage.imageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
-	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(drawImage.imageExtent2D, &colorAttachment, nullptr);
+	VkRenderingAttachmentInfo colorAttachment = vkeUtils::colorAttachmentInfo(drawImage.imageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
+	VkRenderingAttachmentInfo depthAttachment = vkeUtils::depthAttachmentInfo(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(drawImage.imageExtent2D, &colorAttachment, &depthAttachment);
 	
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
 	VkViewport viewport = {};
 	VkRect2D scissor = {};
@@ -254,9 +310,8 @@ void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
 	vkCmdSetViewport(cmd, 0, 1, &viewport);
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-	vkCmdDraw(cmd, 3, 1, 0, 0);
-
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+	// vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+	// vkCmdDraw(cmd, 3, 1, 0, 0);
 
 	GPUDrawPushConstants pushConstants;
 
@@ -268,12 +323,25 @@ void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
 
 	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
 
+	glm::mat4 view = glm::translate(glm::vec3{ 0.0f, 0.0f, -5.0f });
+	glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)drawImage.imageExtent2D.width / (float)drawImage.imageExtent2D.height, 10000.0f, 0.1f);
+
+	projection[1][1] *= -1;
+
+	pushConstants.worldMatrix = projection * view;
+	pushConstants.vertexBufferAddress = testMeshes[2]->meshBuffers.vertexBufferAddress;
+
+	vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
+	vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
+
 	vkCmdEndRendering(cmd);
 }
 
 void Engine::renderImgui(float deltaTime, VkCommandBuffer cmd, VkImageView targetImageView)
 {
-	VkRenderingAttachmentInfo colorAttachment = vkeUtils::renderingAttachmentInfo(targetImageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
+	VkRenderingAttachmentInfo colorAttachment = vkeUtils::colorAttachmentInfo(targetImageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
 	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(swapchainExtent, &colorAttachment, nullptr);
 
 	vkCmdBeginRendering(cmd, &renderingInfo);
@@ -365,6 +433,11 @@ void Engine::initializeSwapchain()
 {
 	createSwapchain(windowExtent.width, windowExtent.height);
 
+	VmaAllocationCreateInfo imageAllocationCreateinfo{};
+
+	imageAllocationCreateinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	imageAllocationCreateinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
 	drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 	drawImage.imageExtent2D = { windowExtent.width, windowExtent.height };
 	drawImage.imageExtent3D = { windowExtent.width, windowExtent.height, 1 };
@@ -376,23 +449,37 @@ void Engine::initializeSwapchain()
 	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
 	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-	VkImageCreateInfo imageCretaeInfo = vkeUtils::imageCreateInfo(drawImage.imageFormat, drawImage.imageExtent3D, drawImageUsages);
-	VmaAllocationCreateInfo imageAllocationCreateinfo{};
+	VkImageCreateInfo drawImageCreateInfo = vkeUtils::imageCreateInfo(drawImage.imageFormat, drawImage.imageExtent3D, drawImageUsages);
 
-	imageAllocationCreateinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-	imageAllocationCreateinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	vmaCreateImage(allocator, &drawImageCreateInfo, &imageAllocationCreateinfo, &drawImage.image, &drawImage.allocation, nullptr);
 
-	vmaCreateImage(allocator, &imageCretaeInfo, &imageAllocationCreateinfo, &drawImage.image, &drawImage.allocation, nullptr);
+	VkImageViewCreateInfo drawImageViewCreateinfo = vkeUtils::imageViewCreateInfo(drawImage.imageFormat, drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
 
-	VkImageViewCreateInfo imageViewCreateinfo = vkeUtils::imageViewCreateInfo(drawImage.imageFormat, drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+	VK_CHECK(vkCreateImageView(device, &drawImageViewCreateinfo, nullptr, &drawImage.imageView));
 
-	VK_CHECK(vkCreateImageView(device, &imageViewCreateinfo, nullptr, &drawImage.imageView));
+	depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
+	depthImage.imageExtent2D = drawImage.imageExtent2D;
+	depthImage.imageExtent3D = drawImage.imageExtent3D;
+
+	VkImageUsageFlags depthImageUsages{};
+
+	depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+	VkImageCreateInfo depthImageCreateInfo = vkeUtils::imageCreateInfo(depthImage.imageFormat, depthImage.imageExtent3D, depthImageUsages);
+
+	vmaCreateImage(allocator, &depthImageCreateInfo, &imageAllocationCreateinfo, &depthImage.image, &depthImage.allocation, nullptr);
+
+	VkImageViewCreateInfo depthImageViewCreateinfo = vkeUtils::imageViewCreateInfo(depthImage.imageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	VK_CHECK(vkCreateImageView(device, &depthImageViewCreateinfo, nullptr, &depthImage.imageView));
 
 	mainDeletionQueue.pushFunction([=]()
 	{
 		vkDestroyImageView(device, drawImage.imageView, nullptr);
-
 		vmaDestroyImage(allocator, drawImage.image, drawImage.allocation);
+
+		vkDestroyImageView(device, depthImage.imageView, nullptr);
+		vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
 	});
 }
 
@@ -627,7 +714,7 @@ void Engine::initializeTrianglePipeline()
 	pipelineBuilder.disableBlending();
 
 	pipelineBuilder.setColorAttachmentFormat(drawImage.imageFormat);
-	pipelineBuilder.setDepthFormat(VK_FORMAT_UNDEFINED);
+	pipelineBuilder.setDepthFormat(depthImage.imageFormat);
 
 	trianglePipeline = pipelineBuilder.build(device);
 
@@ -686,11 +773,11 @@ void Engine::initializeMeshPipeline()
 	pipelineBuilder.setPolygonMode(VK_POLYGON_MODE_FILL);
 	pipelineBuilder.setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	pipelineBuilder.disableMultisampling();
-	pipelineBuilder.disableDepthTest();
+	pipelineBuilder.enableDepthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 	pipelineBuilder.disableBlending();
 
 	pipelineBuilder.setColorAttachmentFormat(drawImage.imageFormat);
-	pipelineBuilder.setDepthFormat(VK_FORMAT_UNDEFINED);
+	pipelineBuilder.setDepthFormat(depthImage.imageFormat);
 
 	meshPipeline = pipelineBuilder.build(device);
 
@@ -698,10 +785,10 @@ void Engine::initializeMeshPipeline()
 	vkDestroyShaderModule(device, triangleFragmentShaderModule, nullptr);
 
 	mainDeletionQueue.pushFunction([&]()
-		{
-			vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr);
-			vkDestroyPipeline(device, meshPipeline, nullptr);
-		});
+	{
+		vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr);
+		vkDestroyPipeline(device, meshPipeline, nullptr);
+	});
 }
 
 void Engine::initializeImgui()
@@ -795,6 +882,8 @@ void Engine::initalizeDefaultData()
 		destroyBuffer(rectangle.vertexBuffer);
 		destroyBuffer(rectangle.indexBuffer);
 	});
+
+	testMeshes = loadGLTFMeshes(this, "assets/basicmesh.glb").value();
 }
 
 void Engine::createSwapchain(uint32_t width, uint32_t height)
@@ -851,52 +940,4 @@ AllocatedBuffer Engine::createBuffer(size_t allocationSize, VkBufferUsageFlags b
 void Engine::destroyBuffer(const AllocatedBuffer& buffer)
 {
 	vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
-}
-
-GPUMeshBuffers Engine::uploadMesh(std::span<Vertex> vertices, std::span<uint32_t> indices)
-{
-	const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
-	const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
-
-	GPUMeshBuffers newSurface;
-
-	newSurface.vertexBuffer = createBuffer(vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	
-	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = newSurface.vertexBuffer.buffer };
-
-	newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
-	newSurface.indexBuffer = createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	AllocatedBuffer stagingBuffer = createBuffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-	void* mappedData = stagingBuffer.allocationInfo.pMappedData;
-	
-	//vmaMapMemory(allocator, stagingBuffer.allocation, &mappedData);
-
-	memcpy(mappedData, vertices.data(), vertexBufferSize); // Copy vertex buffer.
-	memcpy((char*)mappedData + vertexBufferSize, indices.data(), indexBufferSize); // Copy index buffer.
-
-	//vmaUnmapMemory(allocator, stagingBuffer.allocation);
-
-	immediateSubmit([&](VkCommandBuffer cmd)
-	{
-		VkBufferCopy vertexBufferCopy{ 0 };
-
-		vertexBufferCopy.dstOffset = 0;
-		vertexBufferCopy.srcOffset = 0;
-		vertexBufferCopy.size = vertexBufferSize;
-
-		vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.vertexBuffer.buffer, 1, &vertexBufferCopy);
-
-		VkBufferCopy indexBufferCopy{ 0 };
-
-		indexBufferCopy.dstOffset = 0;
-		indexBufferCopy.srcOffset = vertexBufferSize;
-		indexBufferCopy.size = indexBufferSize;
-
-		vkCmdCopyBuffer(cmd, stagingBuffer.buffer, newSurface.indexBuffer.buffer, 1, &indexBufferCopy);
-	});
-
-	destroyBuffer(stagingBuffer);
-
-	return newSurface;
 }

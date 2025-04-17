@@ -1,6 +1,8 @@
 #pragma once
 
 #define GLFW_INCLUDE_VULKAN
+#define GLM_ENABLE_EXPERIMENTAL
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include <GLFW/glfw3.h>
 
@@ -13,6 +15,7 @@
 #include <imgui/imgui_impl_vulkan.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
 
 #include <array>
 #include <chrono>
@@ -21,6 +24,7 @@
 
 #include "utils.h"
 #include "structures.h"
+#include "loader.h"
 
 constexpr uint32_t FRAMES_IN_FLIGHT = 2;
 
@@ -87,6 +91,7 @@ public:
 	VkExtent2D swapchainExtent;
 
 	AllocatedImage drawImage;
+	AllocatedImage depthImage;
 
 	Frame frames[FRAMES_IN_FLIGHT];
 
@@ -114,12 +119,16 @@ public:
 
 	DeletionQueue mainDeletionQueue;
 
+	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
 	void initialize();
 	void run();
 	void cleanUp();
 
 	Frame& getCurrentFrame() { return frames[frameCount % FRAMES_IN_FLIGHT]; };
 	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
+
+	GPUMeshBuffers uploadMesh(std::span<Vertex> vertices, std::span<uint32_t> indices);
 
 private:
 	void render(float deltaTime);
@@ -148,6 +157,4 @@ private:
 
 	AllocatedBuffer createBuffer(size_t allocationSize, VkBufferUsageFlags bufferUsageFlags, VmaMemoryUsage memoryUsage);
 	void destroyBuffer(const AllocatedBuffer& buffer);
-
-	GPUMeshBuffers uploadMesh(std::span<Vertex> vertices, std::span<uint32_t> indices);
 };

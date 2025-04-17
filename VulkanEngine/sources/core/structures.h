@@ -100,6 +100,7 @@ public:
 	void setPolygonMode(VkPolygonMode polygonMode);
 	void setCullMode(VkCullModeFlags cullModeFlags, VkFrontFace frontFace);
 	void disableMultisampling();
+	void enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp);
 	void disableDepthTest();
 	void disableBlending();
 	void setColorAttachmentFormat(VkFormat format);

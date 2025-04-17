@@ -277,7 +277,7 @@ VkPipelineLayoutCreateInfo vkeUtils::pipelineLayoutCreateInfo()
 	return info;
 }
 
-VkRenderingAttachmentInfo vkeUtils::renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue)
+VkRenderingAttachmentInfo vkeUtils::colorAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue)
 {
 	VkRenderingAttachmentInfo info = {};
 
@@ -292,6 +292,21 @@ VkRenderingAttachmentInfo vkeUtils::renderingAttachmentInfo(VkImageView imageVie
 	{
 		info.clearValue = *clearValue;
 	}
+
+	return info;
+}
+
+VkRenderingAttachmentInfo vkeUtils::depthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout)
+{
+	VkRenderingAttachmentInfo info{};
+
+	info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	info.pNext = nullptr;
+	info.imageView = imageView;
+	info.imageLayout = imageLayout;
+	info.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	info.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	info.clearValue.depthStencil.depth = 0.0f;
 
 	return info;
 }

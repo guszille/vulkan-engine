@@ -42,6 +42,7 @@ namespace vkeUtils
 	VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stageFlagBits, VkShaderModule shaderModule, const char* entry = "main");
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo();
 
-	VkRenderingAttachmentInfo renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue);
+	VkRenderingAttachmentInfo colorAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue* clearValue);
+	VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout);
 	VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment);
 }
