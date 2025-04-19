@@ -99,10 +99,16 @@ public:
 	void setInputTopology(VkPrimitiveTopology primitiveTopology);
 	void setPolygonMode(VkPolygonMode polygonMode);
 	void setCullMode(VkCullModeFlags cullModeFlags, VkFrontFace frontFace);
+
 	void disableMultisampling();
+
 	void enableDepthTest(bool depthWriteEnable, VkCompareOp compareOp);
 	void disableDepthTest();
+
+	void enableBlendingAdditive();
+	void enableBlendingAlphaBlend();
 	void disableBlending();
+
 	void setColorAttachmentFormat(VkFormat format);
 	void setDepthFormat(VkFormat format);
 

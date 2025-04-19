@@ -64,6 +64,7 @@ public:
 
 	bool isInitialized = false;
 	bool stopRendering = false;
+	bool resizeRequested = false;
 	bool useValidationLayers = true;
 
 	float deltaTime = 0.0f;
@@ -90,6 +91,9 @@ public:
 	std::vector<VkImageView> swapchainImageViews;
 	VkExtent2D swapchainExtent;
 
+	VkExtent2D drawExtent;
+	float renderScale = 1.0f;
+
 	AllocatedImage drawImage;
 	AllocatedImage depthImage;
 
@@ -105,12 +109,8 @@ public:
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect = 0;
 
-	VkPipelineLayout trianglePipelineLayout;
-	VkPipeline trianglePipeline;
 	VkPipelineLayout meshPipelineLayout;
 	VkPipeline meshPipeline;
-
-	GPUMeshBuffers rectangle;
 
 	// Immediate submit structures.
 	VkFence immFence;
@@ -147,12 +147,12 @@ private:
 	void initializeDescriptors();
 	void initializePipelines();
 	void initializeBackgroundPipelines();
-	void initializeTrianglePipeline();
 	void initializeMeshPipeline();
 	void initializeImgui();
 	void initalizeDefaultData();
 
 	void createSwapchain(uint32_t width, uint32_t height);
+	void resizeSwapchain();
 	void cleanUpSwapchain();
 
 	AllocatedBuffer createBuffer(size_t allocationSize, VkBufferUsageFlags bufferUsageFlags, VmaMemoryUsage memoryUsage);

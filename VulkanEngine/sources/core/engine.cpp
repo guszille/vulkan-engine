@@ -54,6 +54,11 @@ void Engine::run()
 			continue;
 		}
 
+		if (resizeRequested)
+		{
+			resizeSwapchain();
+		}
+
 		ImGui_ImplVulkan_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 
@@ -62,6 +67,8 @@ void Engine::run()
 		if (ImGui::Begin("Background"))
 		{
 			ComputeEffect& selectedComputeEffect = backgroundEffects[currentBackgroundEffect];
+
+			ImGui::SliderFloat("Render Scale", &renderScale, 0.25f, 1.0f);
 
 			ImGui::Text("Selected Effect: %s", selectedComputeEffect.name);
 			
@@ -198,7 +205,16 @@ void Engine::render(float deltaTime)
 
 	// Request image from the swapchain.
 	uint32_t swapchainImageIndex;
-	VK_CHECK(vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex));
+	VkResult acquireNextImageResult = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
+
+	if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		resizeRequested = true;
+		return;
+	}
+
+	drawExtent.width = (uint32_t)(std::min(swapchainExtent.width, drawImage.imageExtent2D.width) * renderScale);
+	drawExtent.height = (uint32_t)(std::min(swapchainExtent.height, drawImage.imageExtent2D.height) * renderScale);
 
 	VkCommandBuffer cmd = getCurrentFrame().mainCommandBuffer;
 
@@ -223,7 +239,7 @@ void Engine::render(float deltaTime)
 	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	// Execute a copy from the draw image into the swapchain image.
-	vkeUtils::copyImageToImage(cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawImage.imageExtent2D, swapchainExtent);
+	vkeUtils::copyImageToImage(cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawExtent, swapchainExtent);
 
 	// Make the swapchain image into attachment optimal, so we can draw on it.
 	vkeUtils::transitionImageLayout(cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -254,7 +270,13 @@ void Engine::render(float deltaTime)
 	presentInfo.pWaitSemaphores = &getCurrentFrame().renderSemaphore;
 	presentInfo.pImageIndices = &swapchainImageIndex;
 
-	VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
+	VkResult queuePresentResult = vkQueuePresentKHR(graphicsQueue, &presentInfo);
+
+	if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		resizeRequested = true;
+		return;
+	}
 
 	frameCount++;
 }
@@ -279,14 +301,14 @@ void Engine::renderInBackground(float deltaTime, VkCommandBuffer cmd)
 	vkCmdPushConstants(cmd, defaultPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.pushConstants);
 
 	// Execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it.
-	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawImage.imageExtent2D.width / 16), (uint32_t)std::ceil(drawImage.imageExtent2D.height / 16), 1);
+	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16), (uint32_t)std::ceil(drawExtent.height / 16), 1);
 }
 
 void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
 {
 	VkRenderingAttachmentInfo colorAttachment = vkeUtils::colorAttachmentInfo(drawImage.imageView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, nullptr);
 	VkRenderingAttachmentInfo depthAttachment = vkeUtils::depthAttachmentInfo(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(drawImage.imageExtent2D, &colorAttachment, &depthAttachment);
+	VkRenderingInfo renderingInfo = vkeUtils::renderingInfo(drawExtent, &colorAttachment, &depthAttachment);
 	
 	vkCmdBeginRendering(cmd, &renderingInfo);
 
@@ -297,34 +319,22 @@ void Engine::renderGeometry(float deltaTime, VkCommandBuffer cmd)
 
 	viewport.x = 0.0f;
 	viewport.y = 0.0f;
-	viewport.width = (float)drawImage.imageExtent2D.width;
-	viewport.height = (float)drawImage.imageExtent2D.height;
+	viewport.width = (float)drawExtent.width;
+	viewport.height = (float)drawExtent.height;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
 	scissor.offset.x = 0;
 	scissor.offset.y = 0;
-	scissor.extent.width = drawImage.imageExtent2D.width;
-	scissor.extent.height = drawImage.imageExtent2D.height;
+	scissor.extent.width = drawExtent.width;
+	scissor.extent.height = drawExtent.height;
 
 	vkCmdSetViewport(cmd, 0, 1, &viewport);
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-	// vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
-	// vkCmdDraw(cmd, 3, 1, 0, 0);
-
 	GPUDrawPushConstants pushConstants;
-
-	pushConstants.worldMatrix = glm::mat4{ 1.0f };
-	pushConstants.vertexBufferAddress = rectangle.vertexBufferAddress;
-
-	vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
-	vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
-
 	glm::mat4 view = glm::translate(glm::vec3{ 0.0f, 0.0f, -5.0f });
-	glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)drawImage.imageExtent2D.width / (float)drawImage.imageExtent2D.height, 10000.0f, 0.1f);
+	glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)drawExtent.width / (float)drawExtent.height, 10000.0f, 0.1f);
 
 	projection[1][1] *= -1;
 
@@ -582,7 +592,6 @@ void Engine::initializePipelines()
 	initializeBackgroundPipelines();
 
 	// Graphics pipelines.
-	initializeTrianglePipeline();
 	initializeMeshPipeline();
 }
 
@@ -674,60 +683,6 @@ void Engine::initializeBackgroundPipelines()
 	});
 }
 
-void Engine::initializeTrianglePipeline()
-{
-	VkShaderModule triangleVertexShaderModule;
-	VkShaderModule triangleFragmentShaderModule;
-
-	if (!vkeUtils::loadShaderModule("sources/shaders/colored_triangle.vert.spv", device, &triangleVertexShaderModule))
-	{
-		fmt::println("Error when building the triangle vertex shader module.");
-	}
-	else
-	{
-		fmt::println("Triangle vertex shader succesfully loaded.");
-	}
-
-	if (!vkeUtils::loadShaderModule("sources/shaders/colored_triangle.frag.spv", device, &triangleFragmentShaderModule))
-	{
-		fmt::println("Error when building the triangle fragment shader module.");
-	}
-	else
-	{
-		fmt::println("Triangle fragment shader succesfully loaded.");
-	}
-
-	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vkeUtils::pipelineLayoutCreateInfo();
-	
-	VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &trianglePipelineLayout));
-
-	PipelineBuilder pipelineBuilder;
-
-	pipelineBuilder.pipelineLayout = trianglePipelineLayout;
-
-	pipelineBuilder.setShaders(triangleVertexShaderModule, triangleFragmentShaderModule);
-	pipelineBuilder.setInputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	pipelineBuilder.setPolygonMode(VK_POLYGON_MODE_FILL);
-	pipelineBuilder.setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-	pipelineBuilder.disableMultisampling();
-	pipelineBuilder.disableDepthTest();
-	pipelineBuilder.disableBlending();
-
-	pipelineBuilder.setColorAttachmentFormat(drawImage.imageFormat);
-	pipelineBuilder.setDepthFormat(depthImage.imageFormat);
-
-	trianglePipeline = pipelineBuilder.build(device);
-
-	vkDestroyShaderModule(device, triangleVertexShaderModule, nullptr);
-	vkDestroyShaderModule(device, triangleFragmentShaderModule, nullptr);
-
-	mainDeletionQueue.pushFunction([&]()
-	{
-		vkDestroyPipelineLayout(device, trianglePipelineLayout, nullptr);
-		vkDestroyPipeline(device, trianglePipeline, nullptr);
-	});
-}
-
 void Engine::initializeMeshPipeline()
 {
 	VkShaderModule triangleVertexShaderModule;
@@ -774,7 +729,7 @@ void Engine::initializeMeshPipeline()
 	pipelineBuilder.setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	pipelineBuilder.disableMultisampling();
 	pipelineBuilder.enableDepthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
-	pipelineBuilder.disableBlending();
+	pipelineBuilder.enableBlendingAdditive();
 
 	pipelineBuilder.setColorAttachmentFormat(drawImage.imageFormat);
 	pipelineBuilder.setDepthFormat(depthImage.imageFormat);
@@ -856,33 +811,6 @@ void Engine::initializeImgui()
 
 void Engine::initalizeDefaultData()
 {
-	std::array<Vertex, 4> rectangleVertices;
-	std::array<uint32_t, 6> rectangleIndices;
-
-	rectangleVertices[0].position = {  0.5f, -0.5f,  0.0f };
-	rectangleVertices[1].position = {  0.5f,  0.5f,  0.0f };
-	rectangleVertices[2].position = { -0.5f, -0.5f,  0.0f };
-	rectangleVertices[3].position = { -0.5f,  0.5f,  0.0f };
-	rectangleVertices[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
-	rectangleVertices[1].color = { 0.5f, 0.5f, 0.5f, 1.0f };
-	rectangleVertices[2].color = { 1.0f, 0.0f, 0.0f, 1.0f };
-	rectangleVertices[3].color = { 0.0f, 1.0f, 0.0f, 1.0f };
-
-	rectangleIndices[0] = 0;
-	rectangleIndices[1] = 1;
-	rectangleIndices[2] = 2;
-	rectangleIndices[3] = 2;
-	rectangleIndices[4] = 1;
-	rectangleIndices[5] = 3;
-
-	rectangle = uploadMesh(rectangleVertices, rectangleIndices);
-
-	mainDeletionQueue.pushFunction([&]()
-	{
-		destroyBuffer(rectangle.vertexBuffer);
-		destroyBuffer(rectangle.indexBuffer);
-	});
-
 	testMeshes = loadGLTFMeshes(this, "assets/basicmesh.glb").value();
 }
 
@@ -904,6 +832,27 @@ void Engine::createSwapchain(uint32_t width, uint32_t height)
 	swapchainExtent = vkbSwapchain.extent;
 	swapchainImages = vkbSwapchain.get_images().value();
 	swapchainImageViews = vkbSwapchain.get_image_views().value();
+}
+
+void Engine::resizeSwapchain()
+{
+	int width = 0, height = 0;
+
+	do
+	{
+		glfwGetFramebufferSize(window, &width, &height);
+		// glfwWaitEvents();
+	} while (width == 0 || height == 0);
+
+	windowExtent.width = (uint32_t)width;
+	windowExtent.height = (uint32_t)height;
+
+	vkDeviceWaitIdle(device);
+
+	cleanUpSwapchain();
+	createSwapchain(windowExtent.width, windowExtent.height);
+
+	resizeRequested = false;
 }
 
 void Engine::cleanUpSwapchain()
